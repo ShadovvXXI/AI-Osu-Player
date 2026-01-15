@@ -51,6 +51,9 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(self.widget)
 
+def osu_cords_to_window_pos(resolution, cords):
+    return int(cords[0] / 512 * resolution[0]), int(cords[1] / 384 * resolution[1])
+
 # обработчик окна и его координаты на экране
 window_handle = FindWindow(None, "osu!")
 l, t, r, b = GetClientRect(window_handle)
@@ -92,9 +95,19 @@ time = datetime.datetime.now()
 beatmap = parser.build_beatmap()
 print("Building done. Time: ", (datetime.datetime.now() - time).microseconds / 1000, 'ms')
 
+# соотносим тайминги с позицией мыши относительно окна
+hit_timings_to_pos = dict()
 for obj in beatmap["hitObjects"]:
-    print(obj["position"])
-
+    match obj["object_name"]:
+        case 'circle':
+            hit_timings_to_pos[obj["startTime"]] = osu_cords_to_window_pos(size, obj["position"])
+        case 'slider':
+            slider_len = len(obj["points"])
+            for x in range(slider_len):
+                hit_timings_to_pos[round(obj["startTime"]+(x/slider_len)*obj["duration"])] = osu_cords_to_window_pos(size, obj["points"][x])
+            # for point in obj["points"]:
+            #     hit_timings_to_pos[obj["startTime"]] = osu_cords_to_window_pos(size, obj["position"])
+        # TODO : сделать обработку для спиннера
 # окно для отладки
 app = QApplication(sys.argv)
 
