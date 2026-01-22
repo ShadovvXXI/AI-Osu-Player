@@ -102,7 +102,7 @@ class MapFileNotFoundError(Exception):
     pass
 
 def approach_time_ms(ar):
-    if ar <= 5:
+    if ar < 5:
         return int(1800 - 120 * ar)
     else:
         return int(1200 - 150 * (ar - 5))
@@ -114,6 +114,7 @@ class Song:
         self.song_name = name
         self.file = None
         self.parser = None
+        self.lead_in = None
         self.approach_time = None
         self.part_of_approach_time = None
         self.hit_timings_to_pos = dict()
@@ -143,21 +144,23 @@ class Song:
     # соотносим тайминги с позицией мыши относительно окна
     def sync_timings_to_pos(self):
         # время появления объекта до момента его нажатия
+        self.lead_in = int(self.parser.beatmap["AudioLeadIn"])
         self.approach_time = approach_time_ms(float(self.parser.beatmap["ApproachRate"]))
         self.part_of_approach_time = int(self.approach_time / 10)
         logging.info("Syncing timings to pos started")
         # заполняем время до начала карты центром экрана
-        for ms in range(self.parser.beatmap["hitObjects"][0]["startTime"]-self.approach_time):
-            self.hit_timings_to_pos[ms] = ((region[2]-region[0])/2, (region[3]-region[1])/2)
+        if not self.lead_in:
+            for ms in range(self.parser.beatmap["hitObjects"][0]["startTime"]-self.approach_time):
+                self.hit_timings_to_pos[ms] = ((region[2]-region[0])/2, (region[3]-region[1])/2)
+        else:
+            for ms in range(-self.lead_in, self.parser.beatmap["hitObjects"][0]["startTime"] - self.approach_time):
+                self.hit_timings_to_pos[ms] = ((region[2] - region[0]) / 2, (region[3] - region[1]) / 2)
 
         for obj in self.parser.beatmap["hitObjects"]:
             prev_point = self.hit_timings_to_pos[max(self.hit_timings_to_pos.keys())]
-            # TODO : сделать правильную обработку карт с появлением первого объекта до начала таймера
             # А кончается Б начинается -> курсор плавно перемещается от А к Б
-            # А кончается Б не начинается -> курсор остается в Б
+            # А кончается Б не начинается -> курсор остается в А
             for moment in range(max(self.hit_timings_to_pos.keys())+1, obj["startTime"]):
-                if moment == 10685:
-                    print()
                 if obj["startTime"] - self.approach_time < moment < obj["startTime"] - self.part_of_approach_time:
                     time_progress = (moment - (obj["startTime"] - self.approach_time)) / self.approach_time
 
