@@ -9,6 +9,7 @@ import sys
 import mouse
 import time as tm
 import logging
+import pickle
 
 from osuparser import beatmapparser, slidercalc
 import os
@@ -21,7 +22,7 @@ logging.basicConfig(level=logging.INFO)
 # путь до папки с песнями
 osu_songs_directory = os.path.join(os.getenv('LOCALAPPDATA'), 'osu!', 'Songs')
 
-class MainWindow(QMainWindow):
+class Recorder(QMainWindow):
     def __init__(self):
         super().__init__()
         self.widget = QtWidgets.QLabel(self)
@@ -194,6 +195,19 @@ class Song:
                 # TODO : сделать обработку для спиннера
         logging.info("Syncing timings to pos ended")
 
+    def save_to_file(self):
+        if self.hit_timings_to_pos:
+            with open(self.song_name+".pkl", "wb") as f:
+                pickle.dump(self.hit_timings_to_pos, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    def load_from_file(self):
+        try:
+            with open(self.song_name+".pkl", "rb") as f:
+                self.hit_timings_to_pos = pickle.load(f)
+        except Exception as e:
+            print("time_to_pos file corrupted:", e)
+
+
 first_song = Song("Rory")
 first_song.parse_map_file("Rory")
 first_song.build_beatmap()
@@ -201,7 +215,7 @@ first_song.sync_timings_to_pos()
 
 app = QApplication(sys.argv)
 
-window = MainWindow()
+window = Recorder()
 window.show()
     
 app.exec()
