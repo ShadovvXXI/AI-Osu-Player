@@ -23,13 +23,17 @@ logging.basicConfig(level=logging.INFO)
 osu_songs_directory = os.path.join(os.getenv('LOCALAPPDATA'), 'osu!', 'Songs')
 
 class Recorder(QMainWindow):
-    def __init__(self):
+    def __init__(self, song_names):
         super().__init__()
         self.widget = QtWidgets.QLabel(self)
         self.setWindowTitle("My App")
+        self.songs = {}
+        for name in song_names:
+            self.songs[name] = {"time_pos": self.load_song(name)}
         self.timer()
-        self.timer_start = None
-        self.recorded_image = dict()
+        self.start_timer = None
+        self.recorded_images = dict()
+        self.recorded_song_name = None
         self.training_state = False
         self.training_time = 0
 
@@ -45,12 +49,15 @@ class Recorder(QMainWindow):
         image = self.update_image()
         if "osu!" not in gw.getAllTitles() and any("osu!" in s for s in gw.getAllTitles()):
             if not self.training_state:
-                self.timer_start = tm.perf_counter_ns()
+                self.start_timer = tm.perf_counter_ns()
                 self.training_state = True
-            elapsed_ms = (tm.perf_counter_ns() - self.timer_start) // 1_000_000
-            self.recorded_image[elapsed_ms] = image
+                self.recorded_song_name = [s for s in gw.getAllTitles() if "osu!" in s][0]
+            elapsed_ms = (tm.perf_counter_ns() - self.start_timer) // 1_000_000
+            self.recorded_images[elapsed_ms] = image
 
         if "osu!" in gw.getAllTitles() and self.training_state:
+            self.sync_image_to_pos()
+            self.recorded_images = dict()
             self.training_state = False
             self.training_time += 1
 
@@ -77,6 +84,26 @@ class Recorder(QMainWindow):
         self.setCentralWidget(self.widget)
 
         return res_img
+
+    def load_song(self, name):
+        new_song = Song(name)
+        if new_song.load_from_file():
+            return new_song
+        else:
+            new_song.parse_map_file(name)
+            new_song.build_beatmap()
+            new_song.sync_timings_to_pos()
+            return new_song
+
+    def sync_image_to_pos(self):
+        for song in self.songs:
+            if song in self.recorded_song_name:
+                # TODO : debug and improve synchronization
+                pos = self.songs[song]["time_pos"].hit_timings_to_pos
+                for timing in self.recorded_images:
+                    self.songs[song][timing] = {"pos":pos[timing]}
+                    self.songs[song][timing] = {"images": self.recorded_images[timing]}
+                break
 
 
 def osu_cords_to_window_pos(resolution, cords):
@@ -204,14 +231,17 @@ class Song:
         try:
             with open(self.song_name+".pkl", "rb") as f:
                 self.hit_timings_to_pos = pickle.load(f)
+                return True
         except Exception as e:
-            print("time_to_pos file corrupted:", e)
+            print("Time_to_pos file corrupted or not find:", e)
+            return False
 
 
-first_song = Song("Rory")
-first_song.parse_map_file("Rory")
-first_song.build_beatmap()
-first_song.sync_timings_to_pos()
+# first_song = Song("Rory")
+# first_song.parse_map_file("Rory")
+# first_song.build_beatmap()
+# first_song.sync_timings_to_pos()
+# first_song.load_from_file()
 
 app = QApplication(sys.argv)
 
