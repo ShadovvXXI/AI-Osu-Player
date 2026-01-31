@@ -40,7 +40,6 @@ def draw_image_with_circle(image, center):
     cv2.circle(image, center, radius, color, thickness)
 
     success = cv2.imwrite("result.jpg", image)
-    # TODO : сдвиг тайминга неправильный
     if not success:
         raise IOError("Не удалось сохранить изображение")
 
@@ -54,6 +53,7 @@ class Recorder(QMainWindow):
             self.songs[name] = {"file": self.load_song(name)}
         self.timer()
         self.start_timer = None
+        self.starting = False
         self.recorded_images = dict()
         self.recorded_song_name = None
         self.training_state = False
@@ -64,16 +64,25 @@ class Recorder(QMainWindow):
         timer.timeout.connect(self.millisecond_tick)
         timer.start(1)
 
+    def starting_skip(self):
+        self.start_timer = tm.perf_counter_ns()
+        self.training_state = True
+        self.recorded_song_name = [s for s in gw.getAllTitles() if "osu!" in s][0]
+        self.starting = False
+
     def millisecond_tick(self):
         # x, y = mouse.get_position()
         # print(f"Курсор находится в точке: ({x}, {y})")
+        if "osu!" not in gw.getAllTitles() and any("osu!" in s for s in gw.getAllTitles()):
+            if not self.training_state and not self.starting:
+                self.starting = True
+                timer = QtCore.QTimer(self)
+                timer.setSingleShot(True)
+                timer.timeout.connect(self.starting_skip)
+                timer.start(280)
 
         image = self.update_image()
-        if "osu!" not in gw.getAllTitles() and any("osu!" in s for s in gw.getAllTitles()):
-            if not self.training_state:
-                self.start_timer = tm.perf_counter_ns()
-                self.training_state = True
-                self.recorded_song_name = [s for s in gw.getAllTitles() if "osu!" in s][0]
+        if self.training_state:
             elapsed_ms = (tm.perf_counter_ns() - self.start_timer) // 1_000_000
             self.recorded_images[elapsed_ms] = image
 
@@ -136,8 +145,9 @@ class Recorder(QMainWindow):
                         "image": self.recorded_images[timing]
                     }
 
-                    if timing > 11000:
-                        draw_image_with_circle(self.songs[song][timing]["image"], self.songs[song][timing]["pos"])
+                    # debug func
+                    # if timing > 10000:
+                    #     draw_image_with_circle(self.songs[song][timing]["image"], self.songs[song][timing]["pos"])
                 break
 
 # TODO : нужна адаптивность под разные устройства
