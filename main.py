@@ -40,7 +40,7 @@ def draw_image_with_circle(image, center):
     cv2.circle(image, center, radius, color, thickness)
 
     success = cv2.imwrite("result.jpg", image)
-    # TODO : сдвиг тайминга неправильный, рывки при слайдерах и переходе от А к Б
+    # TODO : сдвиг тайминга неправильный
     if not success:
         raise IOError("Не удалось сохранить изображение")
 
@@ -136,7 +136,7 @@ class Recorder(QMainWindow):
                         "image": self.recorded_images[timing]
                     }
 
-                    if timing > 12000:
+                    if timing > 11000:
                         draw_image_with_circle(self.songs[song][timing]["image"], self.songs[song][timing]["pos"])
                 break
 
@@ -212,7 +212,7 @@ class Song:
     # соотносим тайминги с позицией мыши относительно окна
     def sync_timings_to_pos(self, save_to_file):
         # время появления объекта до момента его нажатия
-        self.approach_time = approach_time_ms(float(self.parser.beatmap["ApproachRate"]))
+        self.approach_time = approach_time_ms(float(dict(self.parser.beatmap)["ApproachRate"]))
         self.part_of_approach_time = int(self.approach_time / 10)
         logging.info("Syncing timings to pos started")
         # заполняем время до начала карты центром экрана
@@ -222,19 +222,21 @@ class Song:
             self.hit_timings_to_pos[ms] = center
 
         for obj in self.parser.beatmap["hitObjects"]:
-            start_time = obj["startTime"]
+            obj_start_time = obj["startTime"]
             position = obj["position"]
             prev_object_timing = max(self.hit_timings_to_pos)
             prev_point = self.hit_timings_to_pos[prev_object_timing]
+            approach_start_time = min(obj_start_time-prev_object_timing, self.approach_time)
             # А кончается Б начинается -> курсор плавно перемещается от А к Б
             # А кончается Б не начинается -> курсор остается в А
             # TODO : ZERO OPTIMIZATION SUPREMACY FUNC - NEED MORE OPTIMIZE IN IF-ELSE - MAYBE SEPARATE IT AND MADE 3 FOR
-            for moment in range(prev_object_timing+1, start_time):
-                # if moment > 12015:
-                #     print()
+            for moment in range(prev_object_timing+1, obj_start_time):
+                # if moment > 12177:
+                #     print(sep="", end="")
 
-                if start_time - self.approach_time < moment < start_time - self.part_of_approach_time:
-                    time_progress = (moment - (start_time - self.approach_time)) / self.approach_time
+                if obj_start_time - approach_start_time < moment <= obj_start_time - self.part_of_approach_time:
+                    time_progress = ((moment - (obj_start_time - approach_start_time))
+                                     / (approach_start_time-self.part_of_approach_time))
 
                     cords = osu_cords_to_window_pos(position)
                     cords_progress = (cords[0] - prev_point[0], cords[1] - prev_point[1])
@@ -243,7 +245,7 @@ class Song:
                     y = prev_point[1] + cords_progress[1] * time_progress
 
                     point = (x, y)
-                elif moment > start_time - self.part_of_approach_time:
+                elif moment > obj_start_time - self.part_of_approach_time:
                     point = osu_cords_to_window_pos(position)
                 else:
                     point = self.hit_timings_to_pos[prev_object_timing]
@@ -252,10 +254,10 @@ class Song:
             # заполняем тайминги объекта
             match obj["object_name"]:
                 case 'circle':
-                    self.hit_timings_to_pos[start_time] = osu_cords_to_window_pos(position)
+                    self.hit_timings_to_pos[obj_start_time] = osu_cords_to_window_pos(position)
                 case 'slider':
                     for ms in range(obj["duration"] + 1):
-                        moment = start_time + ms
+                        moment = obj_start_time + ms
 
                         point = slidercalc.get_end_point(obj["curveType"],
                                                          (obj["pixelLength"] * ms / obj["duration"]), obj["points"])
