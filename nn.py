@@ -4,22 +4,16 @@ from torch import nn
 from torchvision import transforms
 from torch.utils.data import Dataset
 
+def prepare_data_for_prediction(data, mean, std, transform=transforms.Normalize):
+    transformation = transform([mean] * 5, [std] * 5)
+    return transformation(data)
 
 class OsuImageDataset(Dataset):
-    def __init__(self, song, transform=transforms.Normalize, target_transform=None):
+    def __init__(self, song, mean, std, transform=transforms.Normalize, target_transform=None):
         self.song = []
         for el in sorted(filter(lambda x: type(x) is float, song.keys())):
             self.song.append(song[el])
 
-        pixels = []
-
-        for img in self.song:
-            img = img["image"].astype("float") / 255.0
-            pixels.append(img.ravel())
-
-        pixels = np.concatenate(pixels)
-        mean = pixels.mean()
-        std = pixels.std()
         self.transform = transform([mean]*5, [std]*5)
         self.target_transform = target_transform
 
