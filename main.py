@@ -2,7 +2,7 @@ from PyQt6.QtWidgets import QApplication
 import sys
 import logging
 
-from recorder import Recorder
+from recorder import Recorder, TRAIN, PLAY
 
 logging.basicConfig(level=logging.INFO)
 
@@ -12,7 +12,7 @@ HEIGHT = 125
 
 app = QApplication(sys.argv)
 
-window = Recorder(["Gira Gira"], model_name="0.8", img_size=(WIDTH, HEIGHT))
+window = Recorder(["Gira Gira"], model_name="0.8", img_size=(WIDTH, HEIGHT), behaviour=PLAY)
 window.show()
 
 app.exec()

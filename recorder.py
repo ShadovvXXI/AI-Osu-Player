@@ -5,20 +5,27 @@ from win32gui import FindWindow, GetClientRect, ClientToScreen
 import dxcam
 import time as tm
 import pygetwindow as gw
+from collections import deque
 import cv2
 import pickle
 import logging
+import mouse
 import os
 
 import torch
 from torch.utils.data import DataLoader
 
 from song import Song
-from nn import OsuImageDataset, OsuNeuralNetwork
-from utils import window_pos_to_train_pos, draw_image_with_circle
+from nn import (OsuImageDataset, OsuNeuralNetwork, prepare_data_for_prediction)
+from stats import update_global_stats, calculate_current_mean_std
+from utils import window_pos_to_train_pos, pred_pos_to_window_pos, draw_image_with_circle
+
+TRAIN = 0
+PLAY = 1
+
 
 class Recorder(QMainWindow):
-    def __init__(self, song_names, model_name, img_size):
+    def __init__(self, song_names, model_name, img_size, behaviour):
         super().__init__()
 
         # обработчик окна и его координаты на экране
@@ -46,7 +53,14 @@ class Recorder(QMainWindow):
         # создаем область для записи и начинаем ее
         self.camera = dxcam.create(region=region, output_color="GRAY")
         self.camera.start()
+        self.size = (self.camera.region[2] - self.camera.region[0], self.camera.region[3] - self.camera.region[1])
 
+        # TODO : обработать отсутствие файла, возможно сделать 3 режим с аккумуляцией статистик
+        stats = calculate_current_mean_std()
+        if stats is not None:
+            self.mean, self.std = stats
+
+        self.behaviour = behaviour
         self.model_name = model_name
         self.model = OsuNeuralNetwork()
         self.device = torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else "cpu"
@@ -57,6 +71,7 @@ class Recorder(QMainWindow):
         self.epochs = 10
         lr = 1e-3
         self.optimizer = torch.optim.SGD(self.model.parameters(), lr=lr)
+        self.player_deque = deque(maxlen=5)
 
         self.widget = QtWidgets.QLabel(self)
         self.setWindowTitle("My App")
@@ -79,7 +94,10 @@ class Recorder(QMainWindow):
 
     def timer(self):
         timer = QtCore.QTimer(self)
-        timer.timeout.connect(self.millisecond_tick)
+        if self.behaviour:
+            timer.timeout.connect(self.millisecond_playing_tick)
+        else:
+            timer.timeout.connect(self.millisecond_train_tick)
         timer.start(1)
 
     def starting_skip(self):
@@ -88,7 +106,7 @@ class Recorder(QMainWindow):
         self.recorded_song_name = [s for s in gw.getAllTitles() if "osu!" in s][0]
         self.starting = False
 
-    def millisecond_tick(self):
+    def millisecond_train_tick(self):
         # x, y = mouse.get_position()
         # print(f"Курсор находится в точке: ({x}, {y})")
         if "osu!" not in gw.getAllTitles() and any("osu!" in s for s in gw.getAllTitles()):
@@ -107,7 +125,7 @@ class Recorder(QMainWindow):
         if "osu!" in gw.getAllTitles() and self.training_state:
             self.sync_image_to_pos(save_to_file=True)
 
-            dataset = OsuImageDataset(self.songs[self.recorded_song_name])
+            dataset = OsuImageDataset(self.songs[self.recorded_song_name], self.mean, self.std)
             dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
             for t in range(self.epochs):
                 print(f"Epoch: {t + 1}\n-------------------------------")
@@ -119,6 +137,19 @@ class Recorder(QMainWindow):
             self.recorded_images = dict()
             self.training_state = False
             self.training_time += 1
+
+    def millisecond_playing_tick(self):
+        image = self.update_image()
+        if "osu!" not in gw.getAllTitles() and any("osu!" in s for s in gw.getAllTitles()):
+            if len(self.player_deque) == 5:
+                self.player_deque.append({"image": image})
+                with torch.no_grad():
+                    prepared_data = prepare_data_for_prediction(self.player_deque, self.mean, self.std)
+                    pred = self.model(prepared_data)
+                    pos = pred_pos_to_window_pos(self.size, pred, self.img_size[0], self.img_size[1])
+                    mouse.move(*pos)
+            else:
+                self.player_deque.append({"image": image})
 
     def update_image(self):
         res_img = cv2.resize(self.camera.get_latest_frame(), self.img_size, interpolation=cv2.INTER_AREA)
@@ -156,7 +187,7 @@ class Recorder(QMainWindow):
             if song.lower() in self.recorded_song_name.lower():
                 pos = self.songs[song]["file"].hit_timings_to_pos
                 max_pos = max(pos)
-                size = (self.camera.region[2] - self.camera.region[0], self.camera.region[3] - self.camera.region[1])
+
                 for moment in sorted(self.recorded_images):
                     timing = (moment - self.songs[song]["file"].lead_in +
                               (self.skip_time*1.3 if self.songs[song]["file"].lead_in else 0))
@@ -171,13 +202,13 @@ class Recorder(QMainWindow):
                         continue
 
                     self.songs[song][timing] = {
-                        "pos": window_pos_to_train_pos(size, current_pos, self.img_size[0], self.img_size[1]),
+                        "pos": window_pos_to_train_pos(self.size, current_pos, self.img_size[0], self.img_size[1]),
                         "image": self.recorded_images[moment]
                     }
 
                     # debug func
-                    if moment > 3000:
-                        draw_image_with_circle(self.songs[song][timing]["image"], self.songs[song][timing]["pos"])
+                    # if moment > 3000:
+                    #     draw_image_with_circle(self.songs[song][timing]["image"], self.songs[song][timing]["pos"])
 
                 if save_to_file: self.save_to_file(song)
                 self.recorded_song_name = song
