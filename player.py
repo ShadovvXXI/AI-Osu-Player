@@ -20,12 +20,13 @@ from nn import (OsuImageDataset, OsuNeuralNetwork, prepare_data_for_prediction)
 from stats import update_global_stats, calculate_current_mean_std
 from utils import window_pos_to_train_pos, pred_pos_to_window_pos, draw_image_with_circle
 
-TRAIN = 0
-PLAY = 1
+RECORD = 0
+TRAIN = 1
+PLAY = 2
 
 
 class Recorder(QMainWindow):
-    def __init__(self, song_names, model_name, img_size, behaviour):
+    def __init__(self, song_names, model_name, img_size, mode):
         super().__init__()
 
         # обработчик окна и его координаты на экране
@@ -56,11 +57,9 @@ class Recorder(QMainWindow):
         self.size = (self.camera.region[2] - self.camera.region[0], self.camera.region[3] - self.camera.region[1])
 
         # TODO : обработать отсутствие файла, возможно сделать 3 режим с аккумуляцией статистик
-        stats = calculate_current_mean_std()
-        if stats is not None:
-            self.mean, self.std = stats
+        self.mean, self.std = calculate_current_mean_std()
 
-        self.behaviour = behaviour
+        self.mode = mode
         self.model_name = model_name
         self.model = OsuNeuralNetwork()
         self.device = torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else "cpu"
@@ -79,6 +78,10 @@ class Recorder(QMainWindow):
         self.songs = {}
         for name in song_names:
             self.songs[name] = {"file": self.load_song(name)}
+
+        self.records = {}
+        for name in song_names:
+            self.songs[name] = {"file": self.load_song(name)}
         self.timer()
         self.start_timer = None
         self.starting = False
@@ -94,10 +97,15 @@ class Recorder(QMainWindow):
 
     def timer(self):
         timer = QtCore.QTimer(self)
-        if self.behaviour:
-            timer.timeout.connect(self.millisecond_playing_tick)
-        else:
+        if self.mode == RECORD:
+            timer.timeout.connect(self.millisecond_record_tick)
+        elif self.mode == TRAIN:
+            if not self.mean and not self.std:
+                for song in self.songs.keys()
             timer.timeout.connect(self.millisecond_train_tick)
+        elif self.mode == PLAY:
+            timer.timeout.connect(self.millisecond_playing_tick)
+
         timer.start(1)
 
     def starting_skip(self):
@@ -106,9 +114,7 @@ class Recorder(QMainWindow):
         self.recorded_song_name = [s for s in gw.getAllTitles() if "osu!" in s][0]
         self.starting = False
 
-    def millisecond_train_tick(self):
-        # x, y = mouse.get_position()
-        # print(f"Курсор находится в точке: ({x}, {y})")
+    def millisecond_record_tick(self):
         if "osu!" not in gw.getAllTitles() and any("osu!" in s for s in gw.getAllTitles()):
             if not self.training_state and not self.starting:
                 self.starting = True
@@ -125,18 +131,19 @@ class Recorder(QMainWindow):
         if "osu!" in gw.getAllTitles() and self.training_state:
             self.sync_image_to_pos(save_to_file=True)
 
-            dataset = OsuImageDataset(self.songs[self.recorded_song_name], self.mean, self.std)
-            dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
-            for t in range(self.epochs):
-                print(f"Epoch: {t + 1}\n-------------------------------")
-                self.train_model(dataloader, self.loss_func, self.optimizer, self.device)
-                self.test_model(dataloader, self.loss_func, self.device)
-
-            torch.save(self.model.state_dict(), "./models/"+self.model_name+".pth")
-
             self.recorded_images = dict()
             self.training_state = False
             self.training_time += 1
+
+    def millisecond_train_tick(self):
+        dataset = OsuImageDataset(self.songs[self.recorded_song_name], self.mean, self.std)
+        dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
+        for t in range(self.epochs):
+            print(f"Epoch: {t + 1}\n-------------------------------")
+            self.train_model(dataloader, self.loss_func, self.optimizer, self.device)
+            self.test_model(dataloader, self.loss_func, self.device)
+
+        torch.save(self.model.state_dict(), "./models/" + self.model_name + ".pth")
 
     def millisecond_playing_tick(self):
         image = self.update_image()
@@ -215,9 +222,12 @@ class Recorder(QMainWindow):
                 break
 
     def save_to_file(self, song_name):
-        if len(self.songs[song_name])>2:
+        song = self.songs[song_name]
+        if len(song)>1:
+            file = self.songs[song_name].pop("file")
             with open("records\\"+song_name+".pkl", "wb") as f:
-                pickle.dump(self.songs[song_name], f, protocol=pickle.HIGHEST_PROTOCOL)
+                pickle.dump(song, f, protocol=pickle.HIGHEST_PROTOCOL)
+            song["file"] = file
 
     def load_from_file(self, song_name):
         try:
