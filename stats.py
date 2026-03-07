@@ -4,11 +4,11 @@ import numpy as np
 
 STATS_PATH = "models\\mean_std.pkl"
 
-def calculate_stats_from_song(song):
+def calculate_stats_from_record(song):
     total_sum, squared_sum, pixels = 0, 0, 0
 
-    for img in song:
-        img = img["image"].astype("float") / 255.0
+    for timing in song:
+        img = timing["image"].astype("float") / 255.0
 
         total_sum += img.sum()
         squared_sum += (img**2).sum()
@@ -18,6 +18,14 @@ def calculate_stats_from_song(song):
     variance = squared_sum / pixels - mean ** 2
     M2 = variance * pixels
     return pixels, mean, M2
+
+def combine_stats(stats):
+    pixels = sum(p for p, _, _ in stats)
+    mean = sum(p*m for p, m, _ in stats) / pixels
+    M2 = sum(M2 + p * (m - mean) ** 2 for p, m, M2 in stats)
+
+    std = np.sqrt(M2 / pixels)
+    return mean, std
 
 def load_current_stats():
     if os.path.exists(STATS_PATH):
@@ -39,10 +47,10 @@ def calculate_current_mean_std():
         std = np.sqrt(M2 / pixels)
         return mean, std
     else:
-        return None
+        return None, None
 
 def update_global_stats(song):
-    new_pixels, new_mean, new_M2 = calculate_stats_from_song(song)
+    new_pixels, new_mean, new_M2 = calculate_stats_from_record(song)
 
     stats = load_current_stats()
     if stats is not None:
