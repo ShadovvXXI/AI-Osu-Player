@@ -11,8 +11,8 @@ def prepare_data_for_prediction(data, mean, std, transform=transforms.Normalize)
 class OsuImageDataset(Dataset):
     def __init__(self, song, mean, std, transform=transforms.Normalize, target_transform=None):
         self.song = []
-        for el in sorted(filter(lambda x: type(x) is float, song.keys())):
-            self.song.append(song[el])
+        for moment in sorted(song):
+            self.song.append(song[moment])
 
         self.transform = transform([mean]*5, [std]*5)
         self.target_transform = target_transform

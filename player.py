@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader
 
 from song import Song
 from nn import (OsuImageDataset, OsuNeuralNetwork, prepare_data_for_prediction)
-from stats import update_global_stats, calculate_current_mean_std
+from stats import calculate_current_mean_std, calculate_stats_from_record, combine_stats
 from utils import window_pos_to_train_pos, pred_pos_to_window_pos, draw_image_with_circle
 
 RECORD = 0
@@ -25,7 +25,7 @@ TRAIN = 1
 PLAY = 2
 
 
-class Recorder(QMainWindow):
+class Player(QMainWindow):
     def __init__(self, song_names, model_name, img_size, mode):
         super().__init__()
 
@@ -56,7 +56,6 @@ class Recorder(QMainWindow):
         self.camera.start()
         self.size = (self.camera.region[2] - self.camera.region[0], self.camera.region[3] - self.camera.region[1])
 
-        # TODO : обработать отсутствие файла, возможно сделать 3 режим с аккумуляцией статистик
         self.mean, self.std = calculate_current_mean_std()
 
         self.mode = mode
@@ -75,14 +74,15 @@ class Recorder(QMainWindow):
         self.widget = QtWidgets.QLabel(self)
         self.setWindowTitle("My App")
         self.img_size = img_size
+
         self.songs = {}
         for name in song_names:
             self.songs[name] = {"file": self.load_song(name)}
 
         self.records = {}
         for name in song_names:
-            self.songs[name] = {"file": self.load_song(name)}
-        self.timer()
+            self.load_from_file(name)
+
         self.start_timer = None
         self.starting = False
         self.recorded_images = dict()
@@ -90,23 +90,28 @@ class Recorder(QMainWindow):
         self.training_state = False
         self.training_time = 0
         self.skip_time = 280
+        self.mode_manager()
 
     def __del__(self):
         # окончание записи экрана
         self.camera.stop()
 
-    def timer(self):
-        timer = QtCore.QTimer(self)
+    def mode_manager(self):
         if self.mode == RECORD:
+            timer = QtCore.QTimer(self)
             timer.timeout.connect(self.millisecond_record_tick)
+            timer.start(1)
         elif self.mode == TRAIN:
             if not self.mean and not self.std:
-                for song in self.songs.keys()
-            timer.timeout.connect(self.millisecond_train_tick)
+                stats = []
+                for record in self.records:
+                    stats.append(calculate_stats_from_record(record))
+                self.mean, self.std = combine_stats(stats)
+            self.training_pipeline()
         elif self.mode == PLAY:
+            timer = QtCore.QTimer(self)
             timer.timeout.connect(self.millisecond_playing_tick)
-
-        timer.start(1)
+            timer.start(1)
 
     def starting_skip(self):
         self.start_timer = tm.perf_counter_ns()
@@ -135,15 +140,17 @@ class Recorder(QMainWindow):
             self.training_state = False
             self.training_time += 1
 
-    def millisecond_train_tick(self):
-        dataset = OsuImageDataset(self.songs[self.recorded_song_name], self.mean, self.std)
-        dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
-        for t in range(self.epochs):
-            print(f"Epoch: {t + 1}\n-------------------------------")
-            self.train_model(dataloader, self.loss_func, self.optimizer, self.device)
-            self.test_model(dataloader, self.loss_func, self.device)
+    def training_pipeline(self):
+        for record in self.records:
+            dataset = OsuImageDataset(self.records[record], self.mean, self.std)
+            # TODO : рассмотреть разные batch_size
+            dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
+            for t in range(self.epochs):
+                print(f"Epoch: {t + 1}\n-------------------------------")
+                self.train_model(dataloader, self.loss_func, self.optimizer, self.device)
+                self.test_model(dataloader, self.loss_func, self.device)
 
-        torch.save(self.model.state_dict(), "./models/" + self.model_name + ".pth")
+            torch.save(self.model.state_dict(), "./models/" + self.model_name + ".pth")
 
     def millisecond_playing_tick(self):
         image = self.update_image()
@@ -208,7 +215,7 @@ class Recorder(QMainWindow):
                     else:
                         continue
 
-                    self.songs[song][timing] = {
+                    self.records[song][timing] = {
                         "pos": window_pos_to_train_pos(self.size, current_pos, self.img_size[0], self.img_size[1]),
                         "image": self.recorded_images[moment]
                     }
@@ -222,21 +229,18 @@ class Recorder(QMainWindow):
                 break
 
     def save_to_file(self, song_name):
-        song = self.songs[song_name]
-        if len(song)>1:
-            file = self.songs[song_name].pop("file")
+        if self.records[song_name]:
             with open("records\\"+song_name+".pkl", "wb") as f:
-                pickle.dump(song, f, protocol=pickle.HIGHEST_PROTOCOL)
-            song["file"] = file
+                pickle.dump(self.records[song_name], f, protocol=pickle.HIGHEST_PROTOCOL)
 
     def load_from_file(self, song_name):
         try:
             with open("records\\"+song_name+".pkl", "rb") as f:
-                self.songs[song_name] = pickle.load(f)
+                self.records[song_name] = pickle.load(f)
                 logging.info("Time_to_img_and_pos file loaded")
                 return True
         except Exception as e:
-            logging.info("Time_to_img_and_pos file corrupted or not find: " + str(e))
+            logging.info("Time_to_img_and_pos file for " + song_name + "song corrupted or not find: " + str(e))
             return False
 
     def train_model(self, dataloader, loss_fn, optimizer, device):
