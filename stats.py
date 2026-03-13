@@ -8,7 +8,7 @@ def calculate_stats_from_record(song):
     total_sum, squared_sum, pixels = 0, 0, 0
 
     for timing in song:
-        img = timing["image"].astype("float") / 255.0
+        img = song[timing]["image"].astype("float") / 255.0
 
         total_sum += img.sum()
         squared_sum += (img**2).sum()
@@ -19,20 +19,26 @@ def calculate_stats_from_record(song):
     M2 = variance * pixels
     return pixels, mean, M2
 
-def combine_stats(stats):
+def combine_stats(stats, save_to_file):
     pixels = sum(p for p, _, _ in stats)
     mean = sum(p*m for p, m, _ in stats) / pixels
     M2 = sum(M2 + p * (m - mean) ** 2 for p, m, M2 in stats)
 
     std = np.sqrt(M2 / pixels)
+
+    if save_to_file: save_stats({"pixels": pixels, "mean": mean, "M2": M2})
     return mean, std
+
+def save_stats(stats):
+    with open(STATS_PATH, "wb") as f:
+        pickle.dump(stats, f)
 
 def load_current_stats():
     if os.path.exists(STATS_PATH):
-        with open("models\\mean_std.pkl", "rb") as f:
+        with open(STATS_PATH, "rb") as f:
             stats = pickle.load(f)
 
-        pixels = stats["n"]
+        pixels = stats["pixels"]
         mean = stats["mean"]
         M2 = stats["M2"]
 

@@ -1,3 +1,4 @@
+import numpy as np
 from PyQt6 import QtCore, QtWidgets
 from PyQt6.QtGui import QPixmap, QImage
 from PyQt6.QtWidgets import QMainWindow
@@ -105,10 +106,11 @@ class Player(QMainWindow):
             if not self.mean and not self.std:
                 stats = []
                 for record in self.records:
-                    stats.append(calculate_stats_from_record(record))
-                self.mean, self.std = combine_stats(stats)
+                    stats.append(calculate_stats_from_record(self.records[record]))
+                self.mean, self.std = combine_stats(stats, save_to_file=True)
             self.training_pipeline()
         elif self.mode == PLAY:
+            self.mean, self.std = calculate_current_mean_std()
             timer = QtCore.QTimer(self)
             timer.timeout.connect(self.millisecond_playing_tick)
             timer.start(1)
@@ -156,14 +158,14 @@ class Player(QMainWindow):
         image = self.update_image()
         if "osu!" not in gw.getAllTitles() and any("osu!" in s for s in gw.getAllTitles()):
             if len(self.player_deque) == 5:
-                self.player_deque.append({"image": image})
+                self.player_deque.append(image)
                 with torch.no_grad():
-                    prepared_data = prepare_data_for_prediction(self.player_deque, self.mean, self.std)
+                    prepared_data = prepare_data_for_prediction(np.array(self.player_deque), self.mean, self.std)
                     pred = self.model(prepared_data)
                     pos = pred_pos_to_window_pos(self.size, pred, self.img_size[0], self.img_size[1])
                     mouse.move(*pos)
             else:
-                self.player_deque.append({"image": image})
+                self.player_deque.append(image)
 
     def update_image(self):
         res_img = cv2.resize(self.camera.get_latest_frame(), self.img_size, interpolation=cv2.INTER_AREA)
@@ -240,7 +242,8 @@ class Player(QMainWindow):
                 logging.info("Time_to_img_and_pos file loaded")
                 return True
         except Exception as e:
-            logging.info("Time_to_img_and_pos file for " + song_name + "song corrupted or not find: " + str(e))
+            logging.info("Record file for " + song_name + " song corrupted or not find: " + str(e))
+            self.records[song_name] = {}
             return False
 
     def train_model(self, dataloader, loss_fn, optimizer, device):
