@@ -5,6 +5,7 @@ from torchvision import transforms
 from torch.utils.data import Dataset
 
 def prepare_data_for_prediction(data, mean, std, transform=transforms.Normalize):
+    data = torch.from_numpy(data).float() / 255.0
     transformation = transform([mean] * 5, [std] * 5)
     return transformation(data)
 

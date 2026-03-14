@@ -160,9 +160,9 @@ class Player(QMainWindow):
             if len(self.player_deque) == 5:
                 self.player_deque.append(image)
                 with torch.no_grad():
-                    prepared_data = prepare_data_for_prediction(np.array(self.player_deque), self.mean, self.std)
-                    pred = self.model(prepared_data)
-                    pos = pred_pos_to_window_pos(self.size, pred, self.img_size[0], self.img_size[1])
+                    prepared_data = prepare_data_for_prediction(np.array(self.player_deque), self.mean, self.std).to(self.device)
+                    pred = self.model(prepared_data.unsqueeze(0))
+                    pos = pred_pos_to_window_pos(self.size, (pred[0, 0].item(), pred[0, 1].item()), self.img_size[0], self.img_size[1])
                     mouse.move(*pos)
             else:
                 self.player_deque.append(image)
