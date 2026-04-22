@@ -34,14 +34,21 @@ class OsuNeuralNetwork(nn.Module):
     def __init__(self):
         super().__init__()
         self.conv_pool_part = nn.Sequential(
-            nn.Conv2d(5, 32, 3, 2),
-            nn.Conv2d(32, 64, 3, 2),
-            nn.MaxPool2d(2, 2),
-            nn.MaxPool2d(2, 2)
+            nn.Conv2d(5, 64, 5, 3),
+            nn.ReLU(),
+            nn.Conv2d(64, 128, 5, 2),
+            nn.ReLU(),
+            nn.Conv2d(128, 128, 3, 1),
+            nn.ReLU(),
         )
         self.linear_part = nn.Sequential(
-            nn.Linear(6720, 100),
-            nn.Linear(100, 2),
+            nn.Linear(16128, 2048),
+            nn.ReLU(),
+            nn.Linear(2048, 512),
+            nn.ReLU(),
+            nn.Linear(512, 128),
+            nn.ReLU(),
+            nn.Linear(128, 2),
         )
 
     def forward(self, x):
@@ -49,6 +56,3 @@ class OsuNeuralNetwork(nn.Module):
         x = nn.Flatten()(x)
         x = self.linear_part(x)
         return x
-
-device = torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else "cpu"
-model = OsuNeuralNetwork().to(device)
