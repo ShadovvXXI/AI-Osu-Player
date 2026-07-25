@@ -15,6 +15,7 @@ import os
 
 import torch
 from torch.utils.data import DataLoader
+from torch.optim.lr_scheduler import ExponentialLR
 
 from song import Song
 from nn import (OsuImageDataset, OsuNeuralNetwork, prepare_data_for_prediction)
@@ -66,10 +67,13 @@ class Player(QMainWindow):
         self.model.to(self.device)
         if os.path.exists("./models/"+self.model_name+".pth"):
             self.model.load_state_dict(torch.load("./models/"+self.model_name+".pth"))
-        self.loss_func = torch.nn.SmoothL1Loss()
-        self.epochs = 10
+
+        self.loss_func = torch.nn.SmoothL1Loss(beta=5)
+        self.epochs = 4
         lr = 1e-3
-        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=lr)
+        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=lr, momentum=0.4)
+        self.scheduler = ExponentialLR(self.optimizer, gamma=0.99)
+
         self.player_deque = deque(maxlen=5)
 
         self.widget = QtWidgets.QLabel(self)
@@ -90,7 +94,7 @@ class Player(QMainWindow):
         self.recorded_song_name = ""
         self.training_state = False
         self.training_time = 0
-        self.skip_time = 280
+        self.skip_time = 240
         self.mode_manager()
 
     def __del__(self):
@@ -143,27 +147,26 @@ class Player(QMainWindow):
             self.training_time += 1
 
     def training_pipeline(self):
-        for record in self.records:
-            dataset = OsuImageDataset(self.records[record], self.mean, self.std)
-            # TODO : рассмотреть разные batch_size
-            dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
-            for t in range(self.epochs):
-                print(f"Epoch: {t + 1}\n-------------------------------")
-                self.train_model(dataloader, self.loss_func, self.optimizer, self.device)
-                self.test_model(dataloader, self.loss_func, self.device)
+        dataset = OsuImageDataset(self.records, self.mean, self.std)
+        dataloader = DataLoader(dataset, batch_size=16, shuffle=True)
+        for t in range(self.epochs):
+            print(f"Epoch: {t + 1}\n-------------------------------")
+            self.train_model(dataloader, self.loss_func, self.optimizer, self.device)
+            self.scheduler.step()
+            self.test_model(dataloader, self.loss_func, self.device)
 
-            torch.save(self.model.state_dict(), "./models/" + self.model_name + ".pth")
+        torch.save(self.model.state_dict(), "./models/" + self.model_name + ".pth")
 
     def millisecond_playing_tick(self):
         image = self.update_image()
         if "osu!" not in gw.getAllTitles() and any("osu!" in s for s in gw.getAllTitles()):
             if len(self.player_deque) == 5:
-                self.player_deque.append(image)
                 with torch.no_grad():
                     prepared_data = prepare_data_for_prediction(np.array(self.player_deque), self.mean, self.std).to(self.device)
                     pred = self.model(prepared_data.unsqueeze(0))
                     pos = pred_pos_to_window_pos(self.size, (pred[0, 0].item(), pred[0, 1].item()), self.img_size[0], self.img_size[1])
                     mouse.move(*pos)
+                self.player_deque.append(image)
             else:
                 self.player_deque.append(image)
 
@@ -224,7 +227,7 @@ class Player(QMainWindow):
 
                     # debug func
                     # if moment > 3000:
-                    #     draw_image_with_circle(self.songs[song][timing]["image"], self.songs[song][timing]["pos"])
+                    #     draw_image_with_circle(self.records[song][timing]["image"], self.records[song][timing]["pos"])
 
                 if save_to_file: self.save_to_file(song)
                 self.recorded_song_name = song
@@ -247,6 +250,7 @@ class Player(QMainWindow):
             return False
 
     def train_model(self, dataloader, loss_fn, optimizer, device):
+        self.model.train()
         size = len(dataloader.dataset)
 
         for batch, (X, y) in enumerate(dataloader):
@@ -254,14 +258,14 @@ class Player(QMainWindow):
             y = y.to(device)
 
             pred = self.model(X)
-            loss = loss_fn(pred, y)
+            loss = loss_fn(pred, y.float())
 
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
 
-            if batch % 100 == 0:
-                loss, current = loss.item(), batch + len(X)
+            if batch % 10 == 0:
+                loss, current = loss.item(), batch * dataloader.batch_size
                 print(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
 
     def test_model(self, dataloader, loss_fn, device):
@@ -270,7 +274,7 @@ class Player(QMainWindow):
         size = len(dataloader.dataset)
         num_batches = len(dataloader)
         test_loss = 0
-        mean_euclidean_dist = torch.Tensor([0]).to(device)
+        mean_euclidean_dist = torch.tensor(0.0, device=device)
 
         with torch.no_grad():
             for X, y in dataloader:
@@ -278,9 +282,9 @@ class Player(QMainWindow):
                 y = y.to(device)
 
                 pred = self.model(X)
-                test_loss += loss_fn(pred, y).item()
-                mean_euclidean_dist += torch.norm(pred - y, dim=1)
+                test_loss += loss_fn(pred, y).item() * X.size(0)
+                mean_euclidean_dist += torch.norm(pred - y, dim=1).sum()
 
-        test_loss /= num_batches
+        test_loss /= size
         mean_euclidean_dist /= size
         print(f"test error: \n mean_euclidean_dist: {(mean_euclidean_dist.item()):>0.1f}, avg loss: {test_loss:>8f} \n")

@@ -2,10 +2,10 @@ import cv2
 
 def draw_image_with_circle(image, center):
     # радиус круга в пикселях
-    radius = 10
+    radius = 4
 
     # цвет в формате BGR (чёрный)
-    color = (0, 0, 0)
+    color = (255, 255, 255)
 
     # залитый круг
     thickness = -1

@@ -39,7 +39,7 @@ class Song:
         self.parser = beatmapparser.BeatmapParser()
 
         timer_start = tm.perf_counter_ns()
-        logging.info("Parsing started")
+        logging.info("Parsing of " + map_name + " started")
         self.parser.parseFile(osu_path)
         logging.info("Parsing done. Time: " + str((tm.perf_counter_ns() - timer_start) // 1_000_000) + "ms")
 
@@ -123,5 +123,5 @@ class Song:
                 logging.info("Time_to_pos file loaded")
                 return True
         except Exception as e:
-            logging.info("Time_to_pos file corrupted or not find: " + str(e))
+            logging.info("Time_to_pos file corrupted or not found: " + str(e))
             return False
