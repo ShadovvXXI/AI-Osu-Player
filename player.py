@@ -147,15 +147,28 @@ class Player(QMainWindow):
             self.training_time += 1
 
     def training_pipeline(self):
-        dataset = OsuImageDataset(self.records, self.mean, self.std)
-        dataloader = DataLoader(dataset, batch_size=16, shuffle=True)
+        train_dataset, test_dataset = (OsuImageDataset(dataset, self.mean, self.std) for dataset in self.train_test_split())
+        train_dataloader = DataLoader(train_dataset, batch_size=16, shuffle=True)
+        test_dataloader = DataLoader(test_dataset, batch_size=16, shuffle=False)
         for t in range(self.epochs):
             print(f"Epoch: {t + 1}\n-------------------------------")
-            self.train_model(dataloader, self.loss_func, self.optimizer, self.device)
+            self.train_model(train_dataloader, self.loss_func, self.optimizer, self.device)
             self.scheduler.step()
-            self.test_model(dataloader, self.loss_func, self.device)
+            self.test_model(test_dataloader, self.loss_func, self.device)
 
         torch.save(self.model.state_dict(), "./models/" + self.model_name + ".pth")
+
+    def train_test_split(self):
+        train_dataset = {song_name : {} for song_name in self.records}
+        test_dataset = {song_name : {} for song_name in self.records}
+        for song_name, song in self.records.items():
+            keys = sorted(song.keys())
+            border = int(len(keys)/100*80)
+            for moment in keys[:border]:
+                train_dataset[song_name][moment] = song[moment]
+            for moment in keys[border:]:
+                test_dataset[song_name][moment] = song[moment]
+        return train_dataset, test_dataset
 
     def millisecond_playing_tick(self):
         image = self.update_image()
