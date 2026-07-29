@@ -25,6 +25,11 @@ def window_pos_to_train_pos(resolution, pos, width, height):
 def pred_pos_to_window_pos(resolution, pos, width, height):
     return int(pos[0] / width * resolution[0]), int(pos[1] / height * resolution[1])
 
+def recover_coords(x, y, img_size): # TODO: объединить с to_train_pos
+    x = ((x + 1) / 2) * img_size[0]
+    y = ((y + 1) / 2) * img_size[1]
+    return x, y
+
 def approach_time_ms(ar):
     if ar < 5:
         return int(1800 - 120 * ar)

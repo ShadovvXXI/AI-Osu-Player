@@ -9,8 +9,13 @@ def prepare_data_for_prediction(data, mean, std, transform=transforms.Normalize)
     transformation = transform([mean] * 5, [std] * 5)
     return transformation(data)
 
+def target_transform_func(label, img_size):
+    x = label[0] / img_size[0] * 2 - 1
+    y = label[1] / img_size[1] * 2 - 1
+    return torch.tensor([x, y])
+
 class OsuImageDataset(Dataset):
-    def __init__(self, songs, mean, std, transform=transforms.Normalize, target_transform=None):
+    def __init__(self, songs, mean, std, img_size, transform=transforms.Normalize, target_transform=target_transform_func):
         self.len = 0
         self.songs = [[] for _ in range(len(songs))]
         for idx, song in enumerate(songs):
@@ -20,6 +25,7 @@ class OsuImageDataset(Dataset):
             self.len += len(self.songs[idx])-4
 
         self.transform = transform([mean]*5, [std]*5)
+        self.img_size = img_size
         self.target_transform = target_transform
 
     def __len__(self):
@@ -40,32 +46,45 @@ class OsuImageDataset(Dataset):
         if self.transform:
             image = self.transform(image)
         if self.target_transform:
-            label = self.target_transform(label)
+            label = self.target_transform(label, self.img_size)
         return image, label
 
 class OsuNeuralNetwork(nn.Module):
     def __init__(self):
         super().__init__()
         self.conv_pool_part = nn.Sequential(
-            nn.Conv2d(5, 64, 5, 3),
-            nn.ReLU(),
-            nn.Conv2d(64, 128, 5, 2),
-            nn.ReLU(),
-            nn.Conv2d(128, 128, 3, 1),
-            nn.ReLU(),
+            nn.Conv2d(1, 64, 5, 3), #39x19
+            nn.LeakyReLU(),
+            nn.Conv2d(64, 128, 5, 2), #18x8
+            nn.LeakyReLU(),
+            nn.Conv2d(128, 128, 3, 1),  # 16x6
+            nn.LeakyReLU(),
+            nn.Conv2d(128, 128, 3, 1),  # 14x4
+            nn.LeakyReLU(),
+            nn.Conv2d(128, 64, 1, 1),  # 14x4
+            nn.LeakyReLU(),
+            # nn.AdaptiveAvgPool2d(1)
+        )
+        self.recurent_part = nn.Sequential(
+            nn.GRU(3584, 64, 2, batch_first=True)
         )
         self.linear_part = nn.Sequential(
-            nn.Linear(12288, 2048),
+            nn.Linear(64, 128),
             nn.ReLU(),
-            nn.Linear(2048, 512),
+            nn.Linear(128, 256),
             nn.ReLU(),
-            nn.Linear(512, 128),
+            nn.Linear(256, 128),
             nn.ReLU(),
-            nn.Linear(128, 2),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Linear(64, 2),
         )
 
     def forward(self, x):
-        x = self.conv_pool_part(x)
-        x = nn.Flatten()(x)
-        x = self.linear_part(x)
-        return x
+        out = x.view(x.shape[0] * x.shape[1], 1, x.shape[2], x.shape[3])
+        out = self.conv_pool_part(out)
+        out = nn.Flatten(1, 3)(out)
+        out = out.view(x.shape[0], x.shape[1], out.shape[1])
+        out, hn = self.recurent_part(out)
+        out = self.linear_part(hn[-1])
+        return out
