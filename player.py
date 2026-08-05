@@ -20,7 +20,7 @@ from torch.optim.lr_scheduler import ExponentialLR
 from song import Song
 from nn import (OsuImageDataset, OsuNeuralNetwork, prepare_data_for_prediction)
 from stats import calculate_current_mean_std, calculate_stats_from_record, combine_stats
-from utils import window_pos_to_train_pos, pred_pos_to_window_pos, draw_image_with_circle
+from utils import window_pos_to_train_pos, pred_pos_to_window_pos, draw_image_with_circle, recover_coords
 
 RECORD = 0
 TRAIN = 1
@@ -67,12 +67,14 @@ class Player(QMainWindow):
         self.model.to(self.device)
         if os.path.exists("./models/"+self.model_name+".pth"):
             self.model.load_state_dict(torch.load("./models/"+self.model_name+".pth"))
+        else:
+            logging.info("Model don't exist")
 
-        self.loss_func = torch.nn.SmoothL1Loss(beta=5)
-        self.epochs = 4
-        lr = 1e-3
-        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=lr, momentum=0.4)
-        self.scheduler = ExponentialLR(self.optimizer, gamma=0.99)
+        self.loss_func = torch.nn.SmoothL1Loss(beta=1)
+        self.epochs = 3
+        self.optimizer = torch.optim.AdamW(self.model.parameters(), # или AdamW...
+                                          lr=0.01, betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-4)
+        self.scheduler = ExponentialLR(self.optimizer, gamma=0.9)
 
         self.player_deque = deque(maxlen=5)
 
@@ -147,7 +149,7 @@ class Player(QMainWindow):
             self.training_time += 1
 
     def training_pipeline(self):
-        train_dataset, test_dataset = (OsuImageDataset(dataset, self.mean, self.std) for dataset in self.train_test_split())
+        train_dataset, test_dataset = (OsuImageDataset(dataset, self.mean, self.std, self.img_size) for dataset in self.train_test_split())
         train_dataloader = DataLoader(train_dataset, batch_size=16, shuffle=True)
         test_dataloader = DataLoader(test_dataset, batch_size=16, shuffle=False)
         for t in range(self.epochs):
@@ -174,10 +176,12 @@ class Player(QMainWindow):
         image = self.update_image()
         if "osu!" not in gw.getAllTitles() and any("osu!" in s for s in gw.getAllTitles()):
             if len(self.player_deque) == 5:
-                with torch.no_grad():
+                with (torch.no_grad()):
                     prepared_data = prepare_data_for_prediction(np.array(self.player_deque), self.mean, self.std).to(self.device)
                     pred = self.model(prepared_data.unsqueeze(0))
-                    pos = pred_pos_to_window_pos(self.size, (pred[0, 0].item(), pred[0, 1].item()), self.img_size[0], self.img_size[1])
+                    pos = pred_pos_to_window_pos(self.size,
+                                                 recover_coords(pred[0, 0].item(), pred[0, 1].item(), self.img_size),
+                                                 self.img_size[0], self.img_size[1])
                     mouse.move(*pos)
                 self.player_deque.append(image)
             else:
